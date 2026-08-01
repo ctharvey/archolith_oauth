@@ -8,6 +8,7 @@ from archolith_oauth import (
     AccessTokenVerifier,
     AuthorizationCodeStore,
     AuthorizationServerConfig,
+    ClientMetadataError,
     OAuthAuthenticationError,
     OAuthClientStore,
     ResourceServerConfig,
@@ -40,11 +41,13 @@ def test_metadata_defaults():
         issuer=auth.issuer,
         jwks_uri=auth.jwks_uri,
         scopes_supported=auth.scopes_supported,
+        metadata_url="https://service.example.com/.well-known/oauth-protected-resource",
     )
     assert resource.audiences == (auth.resource,)
     assert protected_resource_metadata(resource)["bearer_methods_supported"] == [
         "header"
     ]
+    assert resource.challenge().startswith("Bearer resource_metadata=")
 
 
 def test_pkce():
@@ -52,6 +55,23 @@ def test_pkce():
     challenge = s256_challenge(verifier)
     assert verify_s256(verifier, challenge)
     assert not verify_s256("wrong", challenge)
+
+
+def test_dcr_rejects_unsupported_scope_and_credentialed_redirect():
+    with pytest.raises(ClientMetadataError):
+        register_public_client(
+            {
+                "redirect_uris": ["https://chat.example.com/callback"],
+                "scope": "service:admin",
+            },
+            supported_scopes=("service:read",),
+        )
+
+    with pytest.raises(ClientMetadataError):
+        register_public_client(
+            {"redirect_uris": ["https://user:secret@chat.example.com/callback"]},
+            supported_scopes=("service:read",),
+        )
 
 
 @pytest.mark.asyncio
