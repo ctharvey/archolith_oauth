@@ -29,4 +29,5 @@ def authorization_server_metadata(config: AuthorizationServerConfig) -> dict[str
         "code_challenge_methods_supported": ["S256"],
         "token_endpoint_auth_methods_supported": ["none"],
         "scopes_supported": list(config.effective_scopes_supported),
+        "protected_resources": [config.resource],
     }
