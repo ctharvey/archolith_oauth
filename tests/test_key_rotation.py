@@ -32,7 +32,7 @@ def test_rotation_preserves_legacy_active_file_and_keeps_only_public_history(tmp
     previous = json.loads(store.previous_path.read_text("utf-8"))
     assert "d" in active
     assert active["kid"] != old_kid
-    assert previous == [pytest.approx(previous[0])]
+    assert len(previous) == 1
     assert previous[0]["kid"] == old_kid
     assert "d" not in previous[0]
     assert store.key_ids() == (active["kid"], old_kid)
