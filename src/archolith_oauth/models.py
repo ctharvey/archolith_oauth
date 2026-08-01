@@ -43,3 +43,16 @@ class AuthCodeRecord(AuthorizationGrant):
     created_at: float = 0.0
     expires_at: float = 0.0
     redeemed_at: float | None = None
+
+
+@dataclass(frozen=True)
+class RefreshTokenRecord:
+    family_id: str
+    client_id: str
+    subject: str
+    scope: str
+    resource: str
+    created_at: float
+    expires_at: float
+    used_at: float | None = None
+    revoked_at: float | None = None
