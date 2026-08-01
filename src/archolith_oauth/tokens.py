@@ -1,4 +1,4 @@
-"""Access-token issuance and authorization-code exchange."""
+"""Access-token issuance, authorization-code exchange, and refresh rotation."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from . import jose
 from .config import AuthorizationServerConfig
 from .models import OAuthClient
 from .pkce import verify_s256
+from .refresh_tokens import RefreshTokenStore
 from .stores import AuthorizationCodeStore, OAuthClientStore
 
 
@@ -28,14 +29,18 @@ class TokenResponse:
     token_type: str
     expires_in: int
     scope: str
+    refresh_token: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             "access_token": self.access_token,
             "token_type": self.token_type,
             "expires_in": self.expires_in,
             "scope": self.scope,
         }
+        if self.refresh_token:
+            payload["refresh_token"] = self.refresh_token
+        return payload
 
 
 class TokenIssuer:
@@ -52,6 +57,7 @@ class TokenIssuer:
         client: OAuthClient,
         scope: str,
         resource: str = "",
+        refresh_token: str | None = None,
     ) -> TokenResponse:
         target_resource = resource or self.config.resource
         if target_resource != self.config.resource:
@@ -75,6 +81,7 @@ class TokenIssuer:
             token_type="Bearer",
             expires_in=ttl,
             scope=scope,
+            refresh_token=refresh_token,
         )
 
 
@@ -88,13 +95,9 @@ def exchange_authorization_code(
     redirect_uri: str,
     code_verifier: str,
     resource: str,
+    refresh_store: RefreshTokenStore | None = None,
 ) -> TokenResponse:
-    """Redeem one authorization code using PKCE and RFC 8707 resource binding.
-
-    MCP clients are required to send the same canonical ``resource`` value at
-    both authorization and token exchange. The code is atomically consumed
-    before binding/PKCE validation, matching OAuth's defensive single-use model.
-    """
+    """Redeem one authorization code using PKCE and RFC 8707 resource binding."""
     if not resource:
         raise TokenExchangeError("invalid_request", "resource is required")
     record = code_store.redeem(
@@ -120,11 +123,77 @@ def exchange_authorization_code(
     client = client_store.get(client_id)
     if client is None:
         raise TokenExchangeError("invalid_grant", "registered client no longer exists")
+
+    refresh_token: str | None = None
+    scope_set = set(record.scope.split())
+    if (
+        issuer.config.issue_refresh_tokens
+        and issuer.config.offline_access_scope in scope_set
+    ):
+        if refresh_store is None:
+            raise TokenExchangeError(
+                "server_error",
+                "refresh token storage is not configured",
+            )
+        refresh_token = refresh_store.issue(
+            client_id=client.client_id,
+            subject=record.subject,
+            scope=record.scope,
+            resource=resource,
+        )
+
     response = issuer.issue(
         subject=record.subject,
         client=client,
         scope=record.scope,
         resource=resource,
+        refresh_token=refresh_token,
     )
     client_store.mark_exchanged(client_id)
     return response
+
+
+def exchange_refresh_token(
+    *,
+    refresh_store: RefreshTokenStore,
+    client_store: OAuthClientStore,
+    issuer: TokenIssuer,
+    refresh_token: str,
+    client_id: str,
+    resource: str,
+) -> TokenResponse:
+    """Rotate a public client's refresh token and mint a new access token."""
+    if not issuer.config.issue_refresh_tokens:
+        raise TokenExchangeError(
+            "unsupported_grant_type",
+            "refresh_token grant is not enabled",
+        )
+    if not refresh_token or not client_id or not resource:
+        raise TokenExchangeError(
+            "invalid_request",
+            "refresh_token, client_id, and resource are required",
+        )
+    if resource != issuer.config.resource:
+        raise TokenExchangeError("invalid_grant", "resource does not match")
+    client = client_store.get(client_id)
+    if client is None:
+        raise TokenExchangeError("invalid_grant", "registered client no longer exists")
+
+    rotated = refresh_store.rotate(
+        token=refresh_token,
+        client_id=client_id,
+        resource=resource,
+    )
+    if rotated is None:
+        raise TokenExchangeError(
+            "invalid_grant",
+            "refresh token is invalid, expired, replayed, or revoked",
+        )
+    record, replacement = rotated
+    return issuer.issue(
+        subject=record.subject,
+        client=client,
+        scope=record.scope,
+        resource=record.resource,
+        refresh_token=replacement,
+    )
