@@ -10,8 +10,13 @@ from .registration import (
     register_public_client,
     validate_authorization_request,
 )
-from .stores import AuthorizationCodeStore, OAuthClientStore
-from .tokens import TokenIssuer, TokenResponse, exchange_authorization_code
+from .stores import AuthorizationCodeStore, OAuthClientStore, hash_secret
+from .tokens import (
+    TokenExchangeError,
+    TokenIssuer,
+    TokenResponse,
+    exchange_authorization_code,
+)
 from .verifier import AccessTokenVerifier, OAuthAuthenticationError, extract_scopes
 
 __all__ = [
@@ -27,12 +32,14 @@ __all__ = [
     "OAuthPrincipal",
     "ResourceServerConfig",
     "SigningKeyStore",
+    "TokenExchangeError",
     "TokenIssuer",
     "TokenResponse",
     "authorization_server_metadata",
     "create_verifier",
     "exchange_authorization_code",
     "extract_scopes",
+    "hash_secret",
     "protected_resource_metadata",
     "register_public_client",
     "s256_challenge",
