@@ -1,18 +1,23 @@
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from archolith_oauth import (
     AccessTokenVerifier,
     AuthorizationCodeStore,
+    AuthorizationGrant,
     AuthorizationServerConfig,
     ClientMetadataError,
     OAuthAuthenticationError,
+    OAuthClient,
     OAuthClientStore,
     ResourceServerConfig,
     SigningKeyStore,
+    TokenExchangeError,
     TokenIssuer,
     authorization_server_metadata,
     exchange_authorization_code,
@@ -74,6 +79,105 @@ def test_dcr_rejects_unsupported_scope_and_credentialed_redirect():
         )
 
 
+def test_store_opens_existing_menhir_schema(tmp_path: Path):
+    db = tmp_path / "menhir_oauth_as.db"
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            """CREATE TABLE oauth_clients (
+                client_id TEXT PRIMARY KEY,
+                client_name TEXT,
+                redirect_uris TEXT,
+                scopes TEXT,
+                client_secret_hash TEXT,
+                created_at REAL,
+                token_endpoint_auth_method TEXT,
+                last_exchanged REAL
+            )"""
+        )
+    store = OAuthClientStore(db)
+    client = OAuthClient(
+        client_id="menhir-client",
+        client_name="Menhir client",
+        redirect_uris=("https://chat.example.com/callback",),
+        scopes=("menhir:read",),
+        client_secret_hash="",
+        created_at=1.0,
+    )
+    store.register(client)
+    assert store.get(client.client_id) == client
+    assert store.count() == 1
+    assert store.all() == [client]
+    assert store.reap_stale(10, now=100.0) == 1
+
+
+def test_store_migrates_initial_package_schema(tmp_path: Path):
+    db = tmp_path / "oauth.db"
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            """CREATE TABLE oauth_clients (
+                client_id TEXT PRIMARY KEY,
+                client_name TEXT NOT NULL,
+                redirect_uris TEXT NOT NULL,
+                scopes TEXT NOT NULL,
+                token_endpoint_auth_method TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                last_exchanged REAL
+            )"""
+        )
+    OAuthClientStore(db)
+    with sqlite3.connect(db) as conn:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(oauth_clients)")}
+    assert "client_secret_hash" in columns
+
+
+def test_token_exchange_requires_matching_resource(tmp_path: Path):
+    resource = "https://service.example.com/mcp"
+    grant = AuthorizationGrant(
+        client_id="client-1",
+        redirect_uri="https://chat.example.com/callback",
+        scope="service:read",
+        code_challenge=s256_challenge("v" * 64),
+        code_challenge_method="S256",
+        resource=resource,
+        subject="user-1",
+    )
+    codes = AuthorizationCodeStore(tmp_path / "oauth.db")
+    clients = OAuthClientStore(tmp_path / "oauth.db")
+    raw_code = codes.issue(grant)
+    fake_issuer = SimpleNamespace(config=SimpleNamespace(resource=resource))
+
+    with pytest.raises(TokenExchangeError) as missing:
+        exchange_authorization_code(
+            code_store=codes,
+            client_store=clients,
+            issuer=fake_issuer,
+            code=raw_code,
+            client_id=grant.client_id,
+            redirect_uri=grant.redirect_uri,
+            code_verifier="v" * 64,
+            resource="",
+        )
+    assert missing.value.error == "invalid_request"
+
+    with pytest.raises(TokenExchangeError) as mismatch:
+        exchange_authorization_code(
+            code_store=codes,
+            client_store=clients,
+            issuer=fake_issuer,
+            code=raw_code,
+            client_id=grant.client_id,
+            redirect_uri=grant.redirect_uri,
+            code_verifier="v" * 64,
+            resource="https://other.example.com/mcp",
+        )
+    assert mismatch.value.error == "invalid_grant"
+    assert codes.redeem(
+        code=raw_code,
+        client_id=grant.client_id,
+        redirect_uri=grant.redirect_uri,
+    ) is None
+
+
 @pytest.mark.asyncio
 async def test_full_code_exchange_and_verification(tmp_path: Path):
     pytest.importorskip("joserfc")
@@ -121,19 +225,20 @@ async def test_full_code_exchange_and_verification(tmp_path: Path):
         client_id=client.client_id,
         redirect_uri=client.redirect_uris[0],
         code_verifier=verifier_text,
+        resource=resource,
     )
     assert token.token_type == "Bearer"
-    assert (
-        codes.redeem(
-            code=raw_code,
-            client_id=client.client_id,
-            redirect_uri=client.redirect_uris[0],
-        )
-        is None
-    )
+    assert codes.redeem(
+        code=raw_code,
+        client_id=client.client_id,
+        redirect_uri=client.redirect_uris[0],
+    ) is None
+
+    public_jwks = SigningKeyStore.public_jwks(key)
+    assert "d" not in public_jwks["keys"][0]
 
     async def load_jwks():
-        return SigningKeyStore.public_jwks(key)
+        return public_jwks
 
     rs = ResourceServerConfig(
         resource=resource,
