@@ -3,8 +3,15 @@
 from .config import AuthorizationServerConfig, ResourceServerConfig
 from .key_store import SigningKeyStore
 from .metadata import authorization_server_metadata, protected_resource_metadata
-from .models import AuthCodeRecord, AuthorizationGrant, OAuthClient, OAuthPrincipal
+from .models import (
+    AuthCodeRecord,
+    AuthorizationGrant,
+    OAuthClient,
+    OAuthPrincipal,
+    RefreshTokenRecord,
+)
 from .pkce import create_verifier, s256_challenge, verify_s256
+from .refresh_tokens import RefreshTokenStore
 from .registration import (
     ClientMetadataError,
     register_public_client,
@@ -16,6 +23,7 @@ from .tokens import (
     TokenIssuer,
     TokenResponse,
     exchange_authorization_code,
+    exchange_refresh_token,
 )
 from .verifier import AccessTokenVerifier, OAuthAuthenticationError, extract_scopes
 
@@ -30,6 +38,8 @@ __all__ = [
     "OAuthClient",
     "OAuthClientStore",
     "OAuthPrincipal",
+    "RefreshTokenRecord",
+    "RefreshTokenStore",
     "ResourceServerConfig",
     "SigningKeyStore",
     "TokenExchangeError",
@@ -38,6 +48,7 @@ __all__ = [
     "authorization_server_metadata",
     "create_verifier",
     "exchange_authorization_code",
+    "exchange_refresh_token",
     "extract_scopes",
     "hash_secret",
     "protected_resource_metadata",
