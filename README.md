@@ -5,6 +5,7 @@ Reusable OAuth 2.1 building blocks extracted from Menhir for Archolith services 
 ## Included
 
 - RFC 9728 protected-resource and RFC 8414 authorization-server metadata
+- Path-aware `.well-known` discovery for issuers/resources with URL paths
 - Dynamic client registration for public PKCE clients
 - Exact redirect, scope, and RFC 8707 resource validation
 - Menhir-compatible SQLite client and single-use authorization-code stores
@@ -27,17 +28,25 @@ config = AuthorizationServerConfig(
     issuer="https://auth.example.com/harness",
     resource="https://harness.example.com/mcp",
     scopes_supported=("harness:read", "harness:session", "harness:admin"),
+    default_scopes=("harness:read", "harness:session"),
     issue_refresh_tokens=True,
 )
 key = SigningKeyStore(Path("oauth-signing-key.json")).load_or_create()
 issuer = TokenIssuer(config, key)
 ```
 
-The client must send the same canonical `resource` value in both the authorization request and token request. Access tokens are audience-bound to that resource.
+The client must send the same canonical `resource` value in both the authorization request and token request. Access tokens are audience-bound to that resource. `offline_access` is advertised when refresh tokens are enabled but is granted only when the client requests it.
+
+For the example above, discovery URLs are:
+
+- Authorization server: `https://auth.example.com/.well-known/oauth-authorization-server/harness`
+- Protected resource: `https://harness.example.com/.well-known/oauth-protected-resource/mcp`
 
 ## Menhir adoption
 
-Menhir keeps its existing settings adapter, consent screen, rate limits, singleton wiring, and `menhir:*` scope-to-tier mapping. The package preserves Menhir's current client database columns and store operations, so migration can retain the existing `menhir_oauth_as.db`. Refresh tokens remain disabled unless Menhir explicitly enables them.
+Menhir keeps its existing settings adapter, consent screen, rate limits, singleton wiring, and `menhir:*` scope-to-tier mapping. The package preserves Menhir's current client database columns, client-store operations, and keyword-based authorization-code issuance, so migration can retain the existing `menhir_oauth_as.db`. Refresh tokens remain disabled unless Menhir explicitly enables them.
+
+Menhir's authorize and token routes must begin requiring the same canonical `resource` value before switching to this package; this is stricter than its current implementation and is required by remote MCP authorization.
 
 ## Harness adoption
 
