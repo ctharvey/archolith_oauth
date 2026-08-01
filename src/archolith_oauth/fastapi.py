@@ -15,7 +15,6 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from .key_store import SigningKeyStore
 from .metadata import authorization_server_metadata, protected_resource_metadata
 from .models import OAuthPrincipal
 from .policy import ScopeRequirement
@@ -72,7 +71,7 @@ def create_protocol_router(
         return JSONResponse(protected_resource_metadata(resource))
 
     async def jwks() -> JSONResponse:
-        return JSONResponse(SigningKeyStore.public_jwks(runtime.signing_key))
+        return JSONResponse(runtime.key_store.public_jwks_all())
 
     router.add_api_route(
         _path(auth.metadata_url),
