@@ -9,7 +9,7 @@ Reusable OAuth 2.1 building blocks extracted from Menhir for Archolith services 
 - Dynamic client registration for public PKCE clients
 - Exact redirect, scope, and RFC 8707 resource validation
 - Menhir-compatible SQLite client and single-use authorization-code stores
-- Persistent RS256 signing keys behind a JOSE seam
+- Persistent RS256 signing keys with minimal active/previous-key rotation
 - Access-token issuance and JWT/JWKS verification
 - Opt-in `offline_access` with rotating, replay-detecting refresh tokens
 - Prefixed environment settings, redacted diagnostics, and deployment preflight
@@ -18,7 +18,7 @@ Reusable OAuth 2.1 building blocks extracted from Menhir for Archolith services 
 - Declarative scope policy for routes and MCP tool catalog filtering
 - Optional FastAPI routes and ASGI bearer middleware
 - Node.js resource-server example using `jose`
-- Dependency-free operator CLI for redacted config and preflight checks
+- Dependency-free operator CLI for config, preflight, and key rotation
 
 ## Install
 
@@ -107,6 +107,21 @@ user. `ConsentNonceStore` atomically consumes each approval transaction so a
 consent form cannot be replayed. `create_session()` can remember explicitly
 approved client IDs without coupling the package to any login or HTML system.
 
+## Signing-key rotation
+
+The active private-key file remains a single JWK compatible with Menhir. On
+rotation, only the retired public key is retained in a sibling file and exposed
+through JWKS, allowing existing one-hour access tokens to finish naturally.
+The default keeps one previous key:
+
+```bash
+archolith-oauth --prefix MYAPP_OAUTH_ rotate-key
+```
+
+Use `--retain-previous 0` to retire the old key immediately or a larger value
+only when the deployment's access-token lifetime genuinely requires it.
+A running `OAuthRuntime` can call `rotate_signing_key()` directly.
+
 ## Node resource servers
 
 `examples/node/oauth-middleware.mjs` shows issuer, audience, JWKS, expiry, and
@@ -131,10 +146,10 @@ For an issuer at `https://auth.example.com/harness` and resource at
 
 Menhir keeps its existing settings adapter, consent screen, rate limits,
 singleton wiring, and `menhir:*` scope-to-tier mapping. The package preserves
-Menhir's current client database columns, client-store operations, and
-keyword-based authorization-code issuance, so migration can retain the existing
-`menhir_oauth_as.db`. Refresh tokens remain disabled unless Menhir explicitly
-enables them.
+Menhir's current client database columns, client-store operations, keyword-based
+authorization-code issuance, and active private-key file shape, so migration can
+retain existing OAuth state. Refresh tokens remain disabled unless Menhir
+explicitly enables them.
 
 Menhir's authorize and token routes must begin requiring the same canonical
 `resource` value before switching to this package; this is stricter than its
