@@ -4,38 +4,49 @@ Reusable OAuth 2.1 building blocks extracted from Menhir for Archolith services 
 
 ## Included
 
-- OAuth protected-resource and authorization-server metadata builders
-- Dynamic client registration validation for public PKCE clients
-- Authorization request validation and scope narrowing
-- SQLite registered-client and single-use authorization-code stores
-- RFC 7636 PKCE helpers
-- Persistent RS256 signing-key storage behind a JOSE seam
+- RFC 9728 protected-resource and RFC 8414 authorization-server metadata
+- Dynamic client registration for public PKCE clients
+- Exact redirect, scope, and RFC 8707 resource validation
+- Menhir-compatible SQLite client and single-use authorization-code stores
+- Persistent RS256 signing keys behind a JOSE seam
 - Access-token issuance and JWT/JWKS verification
-- Generic principals and scopes with no Menhir-specific tier policy
+- Opt-in `offline_access` with rotating, replay-detecting refresh tokens
+- Generic principals and scopes with no service-specific tier policy
 
 ## Deliberate boundaries
 
-This package does **not** provide a login or consent UI, service-specific scope mapping, HTTP framework middleware, or refresh tokens yet. Applications own those policy and presentation layers.
+Applications still own their login/consent UI, HTTP framework routes and middleware, rate limits, user identity, and service-specific scope policy.
 
 ## Example
 
 ```python
 from pathlib import Path
-from archolith_oauth import (
-    AuthorizationServerConfig,
-    SigningKeyStore,
-    TokenIssuer,
-)
+from archolith_oauth import AuthorizationServerConfig, SigningKeyStore, TokenIssuer
 
 config = AuthorizationServerConfig(
-    issuer="https://auth.example.com",
-    resource="https://service.example.com/mcp",
-    scopes_supported=("service:read", "service:write"),
+    issuer="https://auth.example.com/harness",
+    resource="https://harness.example.com/mcp",
+    scopes_supported=("harness:read", "harness:session", "harness:admin"),
+    issue_refresh_tokens=True,
 )
-key_store = SigningKeyStore(Path("oauth-signing-key.json"))
-issuer = TokenIssuer(config, key_store.load_or_create())
+key = SigningKeyStore(Path("oauth-signing-key.json")).load_or_create()
+issuer = TokenIssuer(config, key)
 ```
 
-## Migration target
+The client must send the same canonical `resource` value in both the authorization request and token request. Access tokens are audience-bound to that resource.
 
-Menhir should retain its consent screen, environment mapping, and scope-to-tier policy while importing the protocol core from this package. `cth.harness` can then use the same package through a small Python auth gateway or a language-neutral JWT verification boundary.
+## Menhir adoption
+
+Menhir keeps its existing settings adapter, consent screen, rate limits, singleton wiring, and `menhir:*` scope-to-tier mapping. The package preserves Menhir's current client database columns and store operations, so migration can retain the existing `menhir_oauth_as.db`. Refresh tokens remain disabled unless Menhir explicitly enables them.
+
+## Harness adoption
+
+`cth.harness` remains Node.js. A small Python authorization service uses this package to perform registration, consent, token issuance, and refresh rotation. The Node MCP server validates the resulting JWT against the service's JWKS, issuer, audience, and `harness:*` scopes; it must not forward the inbound token to OpenCode or other providers.
+
+Recommended scopes:
+
+- `harness:read` — inspect sessions, output, status, and diffs
+- `harness:session` — create and continue isolated sessions
+- `harness:admin` — destructive session/worktree administration
+
+Menhir and Harness should use separate `AuthorizationServerConfig` instances and resource audiences. They may share a host, but should use distinct issuer paths or separate authorization-server deployments.
