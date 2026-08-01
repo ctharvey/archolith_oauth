@@ -49,11 +49,16 @@ def register_public_client(
         raise ClientMetadataError("invalid_redirect_uri", "redirect_uris is required")
     if len(redirect_uris) > max_redirect_uris:
         raise ClientMetadataError("invalid_redirect_uri", "too many redirect URIs")
-    normalized = tuple(str(uri).strip() for uri in redirect_uris)
+    if not all(isinstance(uri, str) for uri in redirect_uris):
+        raise ClientMetadataError(
+            "invalid_redirect_uri",
+            "each redirect URI must be a string",
+        )
+    normalized = tuple(uri.strip() for uri in redirect_uris)
     if any(not _valid_redirect_uri(uri) for uri in normalized):
         raise ClientMetadataError("invalid_redirect_uri", "redirect URI is not allowed")
 
-    auth_method = str(metadata.get("token_endpoint_auth_method", "none"))
+    auth_method = metadata.get("token_endpoint_auth_method", "none")
     if auth_method != "none":
         raise ClientMetadataError(
             "invalid_client_metadata", "only public clients are supported"
@@ -79,7 +84,16 @@ def register_public_client(
             "only response_type=code is supported",
         )
 
-    requested = tuple(str(metadata.get("scope", "")).split())
+    scope_raw = metadata.get("scope")
+    if scope_raw is None:
+        requested: tuple[str, ...] = ()
+    elif isinstance(scope_raw, str):
+        requested = tuple(scope_raw.split())
+    else:
+        raise ClientMetadataError(
+            "invalid_client_metadata",
+            "scope must be a space-delimited string",
+        )
     allowed = set(supported_scopes)
     unsupported = set(requested) - allowed
     if unsupported:
@@ -88,9 +102,18 @@ def register_public_client(
             "requested scope is not supported",
         )
     scopes = requested or tuple(supported_scopes)
+
+    client_name_raw = metadata.get("client_name", "OAuth client")
+    if not isinstance(client_name_raw, str):
+        raise ClientMetadataError(
+            "invalid_client_metadata",
+            "client_name must be a string",
+        )
+    client_name = client_name_raw.strip()[:255]
+
     return OAuthClient(
         client_id=secrets.token_urlsafe(24),
-        client_name=str(metadata.get("client_name", "OAuth client"))[:200],
+        client_name=client_name,
         redirect_uris=normalized,
         scopes=scopes,
         token_endpoint_auth_method="none",
