@@ -42,6 +42,7 @@ def register_public_client(
     *,
     supported_scopes: tuple[str, ...],
     max_redirect_uris: int = 5,
+    allow_refresh_tokens: bool = False,
 ) -> OAuthClient:
     redirect_uris = metadata.get("redirect_uris")
     if not isinstance(redirect_uris, list) or not redirect_uris:
@@ -57,12 +58,25 @@ def register_public_client(
         raise ClientMetadataError(
             "invalid_client_metadata", "only public clients are supported"
         )
-    grants = metadata.get("grant_types", ["authorization_code"])
+    grants_raw = metadata.get("grant_types", ["authorization_code"])
     responses = metadata.get("response_types", ["code"])
-    if grants != ["authorization_code"] or responses != ["code"]:
+    if not isinstance(grants_raw, list) or not all(
+        isinstance(grant, str) for grant in grants_raw
+    ):
+        raise ClientMetadataError("invalid_client_metadata", "grant_types must be an array")
+    grants = set(grants_raw)
+    allowed_grants = {"authorization_code"}
+    if allow_refresh_tokens:
+        allowed_grants.add("refresh_token")
+    if "authorization_code" not in grants or not grants.issubset(allowed_grants):
         raise ClientMetadataError(
             "invalid_client_metadata",
-            "only authorization_code with response_type=code is supported",
+            "unsupported grant_types",
+        )
+    if responses != ["code"]:
+        raise ClientMetadataError(
+            "invalid_client_metadata",
+            "only response_type=code is supported",
         )
 
     requested = tuple(str(metadata.get("scope", "")).split())
@@ -102,7 +116,9 @@ def validate_authorization_request(
         raise ValueError("only response_type=code is supported")
     if not code_challenge or code_challenge_method != "S256":
         raise ValueError("PKCE S256 is required")
-    if resource and resource != expected_resource:
+    if not resource:
+        raise ValueError("resource is required")
+    if resource != expected_resource:
         raise ValueError("resource does not match this authorization server")
     requested = tuple(part for part in requested_scope.split() if part) or client.scopes
     if not set(requested).issubset(set(client.scopes)):
