@@ -6,6 +6,7 @@ import secrets
 import time
 from urllib.parse import urlsplit
 
+from .config import AuthorizationServerConfig
 from .models import AuthorizationGrant, OAuthClient
 
 
@@ -41,6 +42,7 @@ def register_public_client(
     metadata: dict,
     *,
     supported_scopes: tuple[str, ...],
+    default_scopes: tuple[str, ...] = (),
     max_redirect_uris: int = 5,
     allow_refresh_tokens: bool = False,
 ) -> OAuthClient:
@@ -84,6 +86,9 @@ def register_public_client(
             "only response_type=code is supported",
         )
 
+    allowed = set(supported_scopes)
+    if default_scopes and not set(default_scopes).issubset(allowed):
+        raise ValueError("default_scopes must be a subset of supported_scopes")
     scope_raw = metadata.get("scope")
     if scope_raw is None:
         requested: tuple[str, ...] = ()
@@ -94,14 +99,13 @@ def register_public_client(
             "invalid_client_metadata",
             "scope must be a space-delimited string",
         )
-    allowed = set(supported_scopes)
     unsupported = set(requested) - allowed
     if unsupported:
         raise ClientMetadataError(
             "invalid_client_metadata",
             "requested scope is not supported",
         )
-    scopes = requested or tuple(supported_scopes)
+    scopes = requested or default_scopes or tuple(supported_scopes)
 
     client_name_raw = metadata.get("client_name", "OAuth client")
     if not isinstance(client_name_raw, str):
@@ -115,9 +119,25 @@ def register_public_client(
         client_id=secrets.token_urlsafe(24),
         client_name=client_name,
         redirect_uris=normalized,
-        scopes=scopes,
+        scopes=tuple(scopes),
         token_endpoint_auth_method="none",
         created_at=time.time(),
+    )
+
+
+def register_public_client_for_server(
+    metadata: dict,
+    *,
+    config: AuthorizationServerConfig,
+    max_redirect_uris: int = 5,
+) -> OAuthClient:
+    """Register using one server config so scope defaults cannot drift."""
+    return register_public_client(
+        metadata,
+        supported_scopes=config.effective_scopes_supported,
+        default_scopes=config.default_scopes,
+        max_redirect_uris=max_redirect_uris,
+        allow_refresh_tokens=config.issue_refresh_tokens,
     )
 
 
