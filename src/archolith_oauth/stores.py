@@ -173,7 +173,44 @@ class AuthorizationCodeStore:
                 )"""
             )
 
-    def issue(self, grant: AuthorizationGrant) -> str:
+    def issue(
+        self,
+        grant: AuthorizationGrant | None = None,
+        *,
+        client_id: str = "",
+        redirect_uri: str = "",
+        scope: str = "",
+        code_challenge: str = "",
+        code_challenge_method: str = "S256",
+        resource: str = "",
+        subject: str = "",
+    ) -> str:
+        """Issue from a grant object or Menhir's existing keyword call shape."""
+        if grant is None:
+            if not all(
+                (
+                    client_id,
+                    redirect_uri,
+                    code_challenge,
+                    resource,
+                    subject,
+                )
+            ):
+                raise ValueError(
+                    "client_id, redirect_uri, code_challenge, resource, and subject are required"
+                )
+            grant = AuthorizationGrant(
+                client_id=client_id,
+                redirect_uri=redirect_uri,
+                scope=scope,
+                code_challenge=code_challenge,
+                code_challenge_method=code_challenge_method,
+                resource=resource,
+                subject=subject,
+            )
+        if grant.code_challenge_method != "S256":
+            raise ValueError("code_challenge_method must be S256")
+
         raw = secrets.token_urlsafe(32)
         now = time.time()
         with _connect(self.db_path) as conn:
