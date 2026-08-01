@@ -21,7 +21,13 @@ def _valid_redirect_uri(uri: str) -> bool:
         parsed = urlsplit(uri)
     except ValueError:
         return False
-    if parsed.fragment or not parsed.scheme or not parsed.netloc:
+    if (
+        parsed.fragment
+        or not parsed.scheme
+        or not parsed.netloc
+        or parsed.username
+        or parsed.password
+    ):
         return False
     if parsed.scheme == "https":
         return True
@@ -59,9 +65,15 @@ def register_public_client(
             "only authorization_code with response_type=code is supported",
         )
 
-    requested = str(metadata.get("scope", "")).split()
+    requested = tuple(str(metadata.get("scope", "")).split())
     allowed = set(supported_scopes)
-    scopes = tuple(scope for scope in requested if scope in allowed) or tuple(supported_scopes)
+    unsupported = set(requested) - allowed
+    if unsupported:
+        raise ClientMetadataError(
+            "invalid_client_metadata",
+            "requested scope is not supported",
+        )
+    scopes = requested or tuple(supported_scopes)
     return OAuthClient(
         client_id=secrets.token_urlsafe(24),
         client_name=str(metadata.get("client_name", "OAuth client"))[:200],
