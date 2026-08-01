@@ -50,7 +50,7 @@ class OAuthRuntime:
         issuer = TokenIssuer(auth_config, signing_key)
 
         async def local_jwks() -> dict:
-            return SigningKeyStore.public_jwks(signing_key)
+            return key_store.public_jwks_all()
 
         verifier = AccessTokenVerifier(resource_config, jwks_loader=local_jwks)
         refresh_store = (
@@ -73,3 +73,9 @@ class OAuthRuntime:
             token_verifier=verifier,
             refresh_store=refresh_store,
         )
+
+    def rotate_signing_key(self, *, retain_previous: int = 1) -> tuple[str, ...]:
+        """Rotate the active signing key and return active + retained key IDs."""
+        self.signing_key = self.key_store.rotate(retain_previous=retain_previous)
+        self.token_issuer = TokenIssuer(self.authorization_config, self.signing_key)
+        return self.key_store.key_ids()
