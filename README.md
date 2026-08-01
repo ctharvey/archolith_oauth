@@ -18,6 +18,7 @@ Reusable OAuth 2.1 building blocks extracted from Menhir for Archolith services 
 - Declarative scope policy for routes and MCP tool catalog filtering
 - Optional FastAPI routes and ASGI bearer middleware
 - Node.js resource-server example using `jose`
+- Dependency-free operator CLI for redacted config and preflight checks
 
 ## Install
 
@@ -50,6 +51,15 @@ MYAPP_OAUTH_DATA_DIR=/var/lib/myapp/oauth
 MYAPP_OAUTH_REFRESH_TOKENS_ENABLED=true
 MYAPP_OAUTH_CONSENT_SECRET=<at-least-32-random-bytes>
 ```
+
+Validate a deployment without printing secrets:
+
+```bash
+archolith-oauth --prefix MYAPP_OAUTH_ show-config --json
+archolith-oauth --prefix MYAPP_OAUTH_ preflight --require-consent-secret
+```
+
+The same CLI is available as `python -m archolith_oauth`.
 
 FastAPI protocol routes:
 
