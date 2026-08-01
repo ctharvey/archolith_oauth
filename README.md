@@ -119,9 +119,8 @@ archolith-oauth --prefix MYAPP_OAUTH_ rotate-key
 ```
 
 Use `--retain-previous 0` to retire the old key immediately or a larger value
-only when the deployment's access-token lifetime genuinely requires it.
-A running `OAuthRuntime` can call `rotate_signing_key()` directly. Tokens issued
-immediately before and after one rotation are covered by the test suite.
+only when the access-token lifetime genuinely requires it. A running
+`OAuthRuntime` can call `rotate_signing_key()` directly.
 
 ## Node resource servers
 
