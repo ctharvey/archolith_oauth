@@ -12,45 +12,130 @@ Reusable OAuth 2.1 building blocks extracted from Menhir for Archolith services 
 - Persistent RS256 signing keys behind a JOSE seam
 - Access-token issuance and JWT/JWKS verification
 - Opt-in `offline_access` with rotating, replay-detecting refresh tokens
-- Generic principals and scopes with no service-specific tier policy
+- Prefixed environment settings, redacted diagnostics, and deployment preflight
+- One-call construction with `OAuthRuntime.from_settings()`
+- Signed, single-use consent-state primitives without prescribing a UI
+- Declarative scope policy for routes and MCP tool catalog filtering
+- Optional FastAPI routes and ASGI bearer middleware
+- Node.js resource-server example using `jose`
 
-## Deliberate boundaries
+## Install
 
-Applications still own their login/consent UI, HTTP framework routes and middleware, rate limits, user identity, and service-specific scope policy.
-
-## Example
-
-```python
-from pathlib import Path
-from archolith_oauth import AuthorizationServerConfig, SigningKeyStore, TokenIssuer
-
-config = AuthorizationServerConfig(
-    issuer="https://auth.example.com/harness",
-    resource="https://harness.example.com/mcp",
-    scopes_supported=("harness:read", "harness:session", "harness:admin"),
-    default_scopes=("harness:read", "harness:session"),
-    issue_refresh_tokens=True,
-)
-key = SigningKeyStore(Path("oauth-signing-key.json")).load_or_create()
-issuer = TokenIssuer(config, key)
+```bash
+pip install archolith-oauth
 ```
 
-The client must send the same canonical `resource` value in both the authorization request and token request. Access tokens are audience-bound to that resource. `offline_access` is advertised when refresh tokens are enabled but is granted only when the client requests it.
+For FastAPI routes and middleware:
 
-For the example above, discovery URLs are:
+```bash
+pip install 'archolith-oauth[fastapi]'
+```
+
+## New-project quickstart
+
+```python
+from archolith_oauth import OAuthRuntime, OAuthSettings
+
+settings = OAuthSettings.from_env("MYAPP_OAUTH_")
+settings.preflight(require_consent_secret=True).raise_for_errors()
+runtime = OAuthRuntime.from_settings(settings)
+```
+
+```text
+MYAPP_OAUTH_ISSUER=https://auth.example.com/myapp
+MYAPP_OAUTH_RESOURCE=https://api.example.com/mcp
+MYAPP_OAUTH_SCOPES=myapp:read myapp:write myapp:admin
+MYAPP_OAUTH_DEFAULT_SCOPES=myapp:read myapp:write
+MYAPP_OAUTH_DATA_DIR=/var/lib/myapp/oauth
+MYAPP_OAUTH_REFRESH_TOKENS_ENABLED=true
+MYAPP_OAUTH_CONSENT_SECRET=<at-least-32-random-bytes>
+```
+
+FastAPI protocol routes:
+
+```python
+from fastapi import FastAPI
+from archolith_oauth.fastapi import create_protocol_router
+
+app = FastAPI()
+app.include_router(create_protocol_router(runtime))
+```
+
+Your application still owns login and the consent page. After approval, call
+`authorize_and_redirect(...)` to validate the exact redirect, scope, PKCE, and
+resource parameters and issue the authorization code.
+
+## Scope policy
+
+```python
+from archolith_oauth import ScopePolicy, ScopeRequirement
+
+policy = ScopePolicy({
+    "list_sessions": "harness:read",
+    "start_session": ("harness:read", "harness:session"),
+    "delete_worktree": "harness:admin",
+    "operate": ScopeRequirement(
+        frozenset({"harness:session", "harness:admin"}),
+        "any",
+    ),
+})
+
+visible_tools = policy.filter_items(
+    tools,
+    principal.scopes,
+    name=lambda tool: tool.name,
+)
+policy.require("start_session", principal.scopes)
+```
+
+Use the same policy for `tools/list` filtering and invocation enforcement.
+
+## Consent state
+
+`ConsentTokenManager` signs the exact authorization parameters shown to the
+user. `ConsentNonceStore` atomically consumes each approval transaction so a
+consent form cannot be replayed. `create_session()` can remember explicitly
+approved client IDs without coupling the package to any login or HTML system.
+
+## Node resource servers
+
+`examples/node/oauth-middleware.mjs` shows issuer, audience, JWKS, expiry, and
+scope validation for the existing Node harness. The inbound bearer token must
+never be forwarded into OpenCode, provider configuration, logs, or child-process
+environments; only the verified principal is trusted.
+
+## Protocol notes
+
+The client must send the same canonical `resource` value in both the
+authorization request and token request. Access tokens are audience-bound to
+that resource. `offline_access` is advertised when refresh tokens are enabled
+but is granted only when the client requests it.
+
+For an issuer at `https://auth.example.com/harness` and resource at
+`https://harness.example.com/mcp`, discovery URLs are:
 
 - Authorization server: `https://auth.example.com/.well-known/oauth-authorization-server/harness`
 - Protected resource: `https://harness.example.com/.well-known/oauth-protected-resource/mcp`
 
 ## Menhir adoption
 
-Menhir keeps its existing settings adapter, consent screen, rate limits, singleton wiring, and `menhir:*` scope-to-tier mapping. The package preserves Menhir's current client database columns, client-store operations, and keyword-based authorization-code issuance, so migration can retain the existing `menhir_oauth_as.db`. Refresh tokens remain disabled unless Menhir explicitly enables them.
+Menhir keeps its existing settings adapter, consent screen, rate limits,
+singleton wiring, and `menhir:*` scope-to-tier mapping. The package preserves
+Menhir's current client database columns, client-store operations, and
+keyword-based authorization-code issuance, so migration can retain the existing
+`menhir_oauth_as.db`. Refresh tokens remain disabled unless Menhir explicitly
+enables them.
 
-Menhir's authorize and token routes must begin requiring the same canonical `resource` value before switching to this package; this is stricter than its current implementation and is required by remote MCP authorization.
+Menhir's authorize and token routes must begin requiring the same canonical
+`resource` value before switching to this package; this is stricter than its
+current implementation and is required by remote MCP authorization.
 
 ## Harness adoption
 
-`cth.harness` remains Node.js. A small Python authorization service uses this package to perform registration, consent, token issuance, and refresh rotation. The Node MCP server validates the resulting JWT against the service's JWKS, issuer, audience, and `harness:*` scopes; it must not forward the inbound token to OpenCode or other providers.
+`cth.harness` remains Node.js. A small Python authorization service uses this
+package to perform registration, consent, token issuance, and refresh rotation.
+The Node MCP server validates the resulting JWT against the service's JWKS,
+issuer, audience, and `harness:*` scopes.
 
 Recommended scopes:
 
@@ -58,4 +143,6 @@ Recommended scopes:
 - `harness:session` — create and continue isolated sessions
 - `harness:admin` — destructive session/worktree administration
 
-Menhir and Harness should use separate `AuthorizationServerConfig` instances and resource audiences. They may share a host, but should use distinct issuer paths or separate authorization-server deployments.
+Menhir and Harness should use separate authorization-server configurations and
+resource audiences. They may share a host, but should use distinct issuer paths
+or separate authorization-server deployments.
