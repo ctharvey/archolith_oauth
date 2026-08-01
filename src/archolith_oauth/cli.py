@@ -6,6 +6,7 @@ import argparse
 import json
 from collections.abc import Sequence
 
+from .key_store import SigningKeyStore
 from .settings import OAuthSettings
 
 
@@ -28,6 +29,15 @@ def _parser() -> argparse.ArgumentParser:
 
     show = subcommands.add_parser("show-config", help="print redacted settings")
     show.add_argument("--json", action="store_true", help="emit JSON")
+
+    rotate = subcommands.add_parser("rotate-key", help="rotate the active signing key")
+    rotate.add_argument(
+        "--retain-previous",
+        type=int,
+        default=1,
+        help="number of retired public keys to keep in JWKS (default: 1)",
+    )
+    rotate.add_argument("--json", action="store_true", help="emit JSON")
     return parser
 
 
@@ -46,6 +56,29 @@ def run(argv: Sequence[str] | None = None) -> int:
         else:
             for key, value in payload.items():
                 print(f"{key}: {value}")
+        return 0
+
+    if args.command == "rotate-key":
+        try:
+            settings.preflight().raise_for_errors()
+            store = SigningKeyStore(settings.signing_key_path)
+            store.rotate(retain_previous=args.retain_previous)
+            key_ids = store.key_ids()
+        except Exception as exc:
+            print(f"rotate-key: ERROR — {exc}")
+            return 1
+        payload = {
+            "active_kid": key_ids[0] if key_ids else "",
+            "retained_previous_kids": list(key_ids[1:]),
+        }
+        if args.json:
+            print(json.dumps(payload, indent=2, sort_keys=True))
+        else:
+            print(f"active_kid: {payload['active_kid']}")
+            print(
+                "retained_previous_kids: "
+                + (", ".join(payload["retained_previous_kids"]) or "none")
+            )
         return 0
 
     report = settings.preflight(
