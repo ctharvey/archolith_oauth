@@ -85,7 +85,7 @@ class AccessTokenVerifier:
         self._jwks = None
         self._jwks_expires_at = 0.0
         self._lock = asyncio.Lock()
-        self._last_forced_refresh = 0.0
+        self._last_forced_refresh = float("-inf")
 
     async def verify(
         self,
