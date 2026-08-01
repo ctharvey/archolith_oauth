@@ -70,6 +70,9 @@ class AuthorizationServerConfig:
     jwks_uri: str = ""
     access_token_ttl_s: int = 3600
     authorization_code_ttl_s: int = 120
+    issue_refresh_tokens: bool = False
+    refresh_token_ttl_s: int = 30 * 24 * 60 * 60
+    offline_access_scope: str = "offline_access"
     allowed_algorithms: tuple[str, ...] = ("RS256",)
 
     def __post_init__(self) -> None:
@@ -78,6 +81,8 @@ class AuthorizationServerConfig:
             raise ValueError("issuer is required")
         if not self.resource:
             raise ValueError("resource is required")
+        if self.issue_refresh_tokens and not self.offline_access_scope:
+            raise ValueError("offline_access_scope is required for refresh tokens")
         object.__setattr__(self, "issuer", base)
         defaults = {
             "authorization_endpoint": f"{base}/oauth/authorize",
@@ -88,3 +93,17 @@ class AuthorizationServerConfig:
         for field_name, value in defaults.items():
             if not getattr(self, field_name):
                 object.__setattr__(self, field_name, value)
+
+    @property
+    def effective_scopes_supported(self) -> tuple[str, ...]:
+        scopes = list(self.scopes_supported)
+        if self.issue_refresh_tokens and self.offline_access_scope not in scopes:
+            scopes.append(self.offline_access_scope)
+        return tuple(scopes)
+
+    @property
+    def grant_types_supported(self) -> tuple[str, ...]:
+        grants = ["authorization_code"]
+        if self.issue_refresh_tokens:
+            grants.append("refresh_token")
+        return tuple(grants)
