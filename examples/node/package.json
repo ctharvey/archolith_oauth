@@ -1,0 +1,11 @@
+{
+  "name": "archolith-oauth-node-example",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20.19"
+  },
+  "dependencies": {
+    "jose": "^6.2.3"
+  }
+}

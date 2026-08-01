@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "archolith-oauth"
-version = "0.1.0"
+version = "0.2.0"
 description = "Reusable OAuth 2.1 building blocks for Archolith services and remote MCP resources."
 readme = "README.md"
 license = "Apache-2.0"
@@ -16,17 +16,25 @@ dependencies = [
 ]
 classifiers = [
   "Development Status :: 3 - Alpha",
-  "License :: OSI Approved :: Apache Software License",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Topic :: Security",
 ]
 
+[project.scripts]
+archolith-oauth = "archolith_oauth.cli:main"
+
 [project.optional-dependencies]
+fastapi = [
+  "fastapi>=0.115,<1",
+  "python-multipart>=0.0.9,<1",
+]
 dev = [
   "pytest>=8,<9",
   "pytest-asyncio>=0.24,<1",
+  "fastapi>=0.115,<1",
+  "python-multipart>=0.0.9,<1",
 ]
 
 [project.urls]

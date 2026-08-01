@@ -25,8 +25,9 @@ def authorization_server_metadata(config: AuthorizationServerConfig) -> dict[str
         "registration_endpoint": config.registration_endpoint,
         "jwks_uri": config.jwks_uri,
         "response_types_supported": ["code"],
-        "grant_types_supported": ["authorization_code"],
+        "grant_types_supported": list(config.grant_types_supported),
         "code_challenge_methods_supported": ["S256"],
         "token_endpoint_auth_methods_supported": ["none"],
-        "scopes_supported": list(config.scopes_supported),
+        "scopes_supported": list(config.effective_scopes_supported),
+        "protected_resources": [config.resource],
     }

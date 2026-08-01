@@ -85,14 +85,21 @@ class AccessTokenVerifier:
         self._jwks = None
         self._jwks_expires_at = 0.0
         self._lock = asyncio.Lock()
-        self._last_forced_refresh = 0.0
+        self._last_forced_refresh = float("-inf")
 
     async def verify(
         self,
         token: str,
         *,
         required_scopes: set[str] | None = None,
+        any_scopes: set[str] | None = None,
     ) -> OAuthPrincipal:
+        """Verify signature, issuer, audience, identity, and requested scopes.
+
+        ``required_scopes`` is all-of. ``any_scopes`` is any-of. Applications
+        should usually perform tool-policy mapping after verification and pass
+        only the minimum scope requirement for the current operation.
+        """
         if not token:
             raise OAuthAuthenticationError("invalid_token", "Missing bearer token")
         claims = await self._decode(token)
@@ -115,12 +122,19 @@ class AccessTokenVerifier:
                 "Access token audience/resource does not match",
             )
         scopes = extract_scopes(claims)
-        if required_scopes and not scopes.intersection(required_scopes):
+        if required_scopes and not required_scopes.issubset(scopes):
             raise OAuthAuthenticationError(
                 "insufficient_scope",
-                "Access token does not include a required scope",
+                "Access token does not include every required scope",
                 status_code=403,
                 scope=" ".join(sorted(required_scopes)),
+            )
+        if any_scopes and not scopes.intersection(any_scopes):
+            raise OAuthAuthenticationError(
+                "insufficient_scope",
+                "Access token does not include an accepted scope",
+                status_code=403,
+                scope=" ".join(sorted(any_scopes)),
             )
         return OAuthPrincipal(
             subject=_derive_subject(claims),
