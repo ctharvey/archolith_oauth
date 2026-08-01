@@ -21,6 +21,7 @@ class OAuthClient:
     client_name: str
     redirect_uris: tuple[str, ...]
     scopes: tuple[str, ...]
+    client_secret_hash: str = ""
     token_endpoint_auth_method: str = "none"
     created_at: float = 0.0
     last_exchanged: float | None = None
