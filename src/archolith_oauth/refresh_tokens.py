@@ -15,11 +15,26 @@ def _connect(path: Path) -> sqlite3.Connection:
     return sqlite3.connect(path, timeout=30.0)
 
 
+def _record(row: sqlite3.Row, *, used_at: float | None = None) -> RefreshTokenRecord:
+    return RefreshTokenRecord(
+        family_id=row["family_id"],
+        client_id=row["client_id"],
+        subject=row["subject"],
+        scope=row["scope"],
+        resource=row["resource"],
+        created_at=float(row["created_at"]),
+        expires_at=float(row["expires_at"]),
+        used_at=row["used_at"] if used_at is None else used_at,
+        revoked_at=row["revoked_at"],
+    )
+
+
 class RefreshTokenStore:
     """SQLite-backed refresh tokens stored only as SHA-256 hashes.
 
-    A token is single-use. Redeeming it marks it used; replaying a used token
-    revokes the entire token family, including its newest rotated token.
+    Tokens are single-use. Rotation happens in one SQLite transaction. Reusing
+    an already-consumed token revokes its entire family, including the newest
+    rotated token, as required for public-client refresh-token replay defense.
     """
 
     def __init__(self, db_path: Path, *, ttl_s: float = 30 * 24 * 60 * 60) -> None:
@@ -78,16 +93,19 @@ class RefreshTokenStore:
             )
         return raw
 
-    def redeem(
+    def rotate(
         self,
         *,
         token: str,
         client_id: str,
         resource: str,
         now: float | None = None,
-    ) -> RefreshTokenRecord | None:
+    ) -> tuple[RefreshTokenRecord, str] | None:
         token_hash = hash_secret(token)
-        redeemed_at = time.time() if now is None else now
+        rotated_at = time.time() if now is None else now
+        replacement = secrets.token_urlsafe(48)
+        replacement_hash = hash_secret(replacement)
+
         with _connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             conn.execute("BEGIN IMMEDIATE")
@@ -103,13 +121,13 @@ class RefreshTokenStore:
                 and row["resource"] == resource
                 and row["used_at"] is None
                 and row["revoked_at"] is None
-                and float(row["expires_at"]) > redeemed_at
+                and float(row["expires_at"]) > rotated_at
             )
             if not valid:
                 conn.execute(
                     "UPDATE oauth_refresh_tokens SET revoked_at = COALESCE(revoked_at, ?) "
                     "WHERE family_id = ?",
-                    (redeemed_at, row["family_id"]),
+                    (rotated_at, row["family_id"]),
                 )
                 return None
 
@@ -117,27 +135,34 @@ class RefreshTokenStore:
                 """UPDATE oauth_refresh_tokens SET used_at = ?
                    WHERE token_hash = ? AND used_at IS NULL AND revoked_at IS NULL
                      AND expires_at > ?""",
-                (redeemed_at, token_hash, redeemed_at),
+                (rotated_at, token_hash, rotated_at),
             )
             if cursor.rowcount != 1:
                 conn.execute(
                     "UPDATE oauth_refresh_tokens SET revoked_at = COALESCE(revoked_at, ?) "
                     "WHERE family_id = ?",
-                    (redeemed_at, row["family_id"]),
+                    (rotated_at, row["family_id"]),
                 )
                 return None
 
-        return RefreshTokenRecord(
-            family_id=row["family_id"],
-            client_id=row["client_id"],
-            subject=row["subject"],
-            scope=row["scope"],
-            resource=row["resource"],
-            created_at=float(row["created_at"]),
-            expires_at=float(row["expires_at"]),
-            used_at=redeemed_at,
-            revoked_at=row["revoked_at"],
-        )
+            conn.execute(
+                """INSERT INTO oauth_refresh_tokens
+                   (token_hash, family_id, client_id, subject, scope, resource,
+                    created_at, expires_at, used_at, revoked_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)""",
+                (
+                    replacement_hash,
+                    row["family_id"],
+                    row["client_id"],
+                    row["subject"],
+                    row["scope"],
+                    row["resource"],
+                    rotated_at,
+                    rotated_at + self.ttl_s,
+                ),
+            )
+
+        return _record(row, used_at=rotated_at), replacement
 
     def family_is_revoked(self, family_id: str) -> bool:
         with _connect(self.db_path) as conn:
