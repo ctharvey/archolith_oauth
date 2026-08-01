@@ -23,3 +23,19 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -e '.[dev]'
       - run: python -m pytest
+
+  node-example:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: examples/node
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: examples/node/package-lock.json
+      - run: npm install --package-lock-only
+      - run: npm ci
+      - run: node --check oauth-middleware.mjs
