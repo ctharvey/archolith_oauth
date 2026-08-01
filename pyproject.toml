@@ -22,6 +22,9 @@ classifiers = [
   "Topic :: Security",
 ]
 
+[project.scripts]
+archolith-oauth = "archolith_oauth.cli:main"
+
 [project.optional-dependencies]
 fastapi = [
   "fastapi>=0.115,<1",
